@@ -5,6 +5,82 @@ import { normalizeSupportedLocale } from "../i18n/locale";
 import { hasFeature } from "../tenants/policy";
 import { buildStorefrontCacheKey, isPrivateStorefrontPath, isPublicStorefrontPath, normalizeHostname, type PlatformHostKind } from "./routing";
 
+// The KV tier caches only *positive* resolver resolutions (the version-fenced
+// cache key parts) for a bounded TTL. It is never authoritative: any mutation
+// that can invalidate a resolution purges these entries, and the TTL backstop
+// bounds staleness for everything else. A missing or failing binding falls
+// back to the D1 resolver on every request.
+const STOREFRONT_RESOLVER_KV_PREFIX = "storefront-resolver:";
+const STOREFRONT_RESOLVER_TTL_SECONDS = 30;
+
+type StorefrontResolverKeyParts = { defaultLocale: string; domainId: string; version: string };
+
+/** Resolver environment: the KV tier is optional and D1 is always authoritative. */
+export type StorefrontResolverEnv = Pick<AppBindings, "PLATFORM_DB"> & { PLATFORM_CACHE?: KVNamespace };
+
+function isSafeResolverKeyParts(value: unknown): value is StorefrontResolverKeyParts {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { defaultLocale?: unknown; domainId?: unknown; version?: unknown };
+  return typeof candidate.defaultLocale === "string"
+    && candidate.defaultLocale.length > 0
+    && candidate.defaultLocale.length <= 16
+    && typeof candidate.domainId === "string"
+    && /^[a-z0-9][a-z0-9_-]{0,127}$/iu.test(candidate.domainId)
+    && typeof candidate.version === "string"
+    && /^[1-9][0-9]*(?:-[1-9][0-9]*)?$/u.test(candidate.version);
+}
+
+async function readResolverKeyParts(env: StorefrontResolverEnv, hostname: string): Promise<StorefrontResolverKeyParts | null> {
+  const kv = env.PLATFORM_CACHE;
+  if (kv === undefined) return null;
+  try {
+    const raw = await kv.get(`${STOREFRONT_RESOLVER_KV_PREFIX}${hostname}`);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isSafeResolverKeyParts(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeResolverKeyParts(env: StorefrontResolverEnv, hostname: string, parts: StorefrontResolverKeyParts): Promise<void> {
+  const kv = env.PLATFORM_CACHE;
+  if (kv === undefined) return;
+  try {
+    await kv.put(
+      `${STOREFRONT_RESOLVER_KV_PREFIX}${hostname}`,
+      JSON.stringify({ ...parts, storedAt: new Date().toISOString() }),
+      { expirationTtl: STOREFRONT_RESOLVER_TTL_SECONDS },
+    );
+  } catch {
+    // A KV outage must never break storefront resolution; D1 stays authoritative.
+  }
+}
+
+export async function purgeStorefrontResolverCache(env: StorefrontResolverEnv, hostnames: readonly string[]): Promise<void> {
+  const kv = env.PLATFORM_CACHE;
+  if (kv === undefined) return;
+  for (const hostname of hostnames) {
+    const normalized = normalizeHostname(hostname);
+    if (normalized === "") continue;
+    try {
+      await kv.delete(`${STOREFRONT_RESOLVER_KV_PREFIX}${normalized}`);
+    } catch {
+      // TTL bounds staleness when KV deletion is unavailable.
+    }
+  }
+}
+
+/** Purges the resolver entries of every hostname currently mapped to the shop. */
+export async function purgeStorefrontResolverCacheForShop(env: StorefrontResolverEnv, shopId: string): Promise<void> {
+  try {
+    const rows = await env.PLATFORM_DB.prepare("SELECT hostname_normalized AS hostname FROM shop_domains WHERE shop_id = ? AND deleted_at IS NULL").bind(shopId).all<{ hostname: string }>();
+    await purgeStorefrontResolverCache(env, rows.results.map((row) => row.hostname));
+  } catch {
+    // D1 unavailability must not turn a purge into a request failure.
+  }
+}
+
 type ActiveDomainRow = {
   domainId: string;
   domainType: string;
@@ -36,7 +112,7 @@ export function isStorefrontCacheCandidate(input: {
 }
 
 export async function resolveActiveStorefrontCacheKey(input: {
-  env: Pick<AppBindings, "PLATFORM_DB">;
+  env: StorefrontResolverEnv;
   hostname: string;
   locale?: string;
   pathname: string;
@@ -44,6 +120,20 @@ export async function resolveActiveStorefrontCacheKey(input: {
 }): Promise<string | null> {
   const hostname = normalizeHostname(input.hostname);
   if (hostname === "") return null;
+
+  // Bounded KV shortcut: a cached positive resolution rebuilds the same
+  // version-fenced key without the D1 round-trip. Miss/failure → D1 below.
+  const cachedParts = await readResolverKeyParts(input.env, hostname);
+  if (cachedParts !== null) {
+    return buildStorefrontCacheKey({
+      hostname,
+      incarnation: cachedParts.domainId,
+      locale: normalizeSupportedLocale(input.locale ?? cachedParts.defaultLocale),
+      pathname: input.pathname,
+      version: cachedParts.version,
+      ...(input.search === undefined ? {} : { search: input.search }),
+    });
+  }
 
   const row = await input.env.PLATFORM_DB.prepare(`
     SELECT shop_domains.id AS domainId,
@@ -139,12 +229,15 @@ export async function resolveActiveStorefrontCacheKey(input: {
     || !Number.isSafeInteger(row.publishedVersion)
     || row.publishedVersion < 1) return null;
 
-  return buildStorefrontCacheKey({
+  const version = `${String(row.domainVersion)}-${String(row.publishedVersion)}`;
+  const key = buildStorefrontCacheKey({
     hostname,
     incarnation: row.domainId,
     locale: normalizeSupportedLocale(input.locale ?? row.defaultLocale),
     pathname: input.pathname,
-    version: `${String(row.domainVersion)}-${String(row.publishedVersion)}`,
+    version,
     ...(input.search === undefined ? {} : { search: input.search }),
   });
+  await writeResolverKeyParts(input.env, hostname, { defaultLocale: row.defaultLocale, domainId: row.domainId, version });
+  return key;
 }

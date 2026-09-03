@@ -671,7 +671,7 @@ describe("Telegram generic connection runtime bridge", () => {
         id, shop_id, integration_id, credential_id, integration_generation,
         update_id, payload_hash, update_kind, status, attempts, received_at, updated_at
       ) VALUES (?, 'shop-telegram-runtime', ?, ?, ?, ?, ?, 'message', ?, 1, ?, ?)
-    `).run("update-rotation-pending", integration.id, integration.credentialId, integration.generation, 501, "hash-501", "processing", NOW, NOW);
+    `).run("update-rotation-pending", integration.id, integration.credentialId, integration.generation, 501, "hash-501", "processing", NOW, new Date().toISOString());
 
     const webhookCountBeforeBusyRotation = runtime.webhookPayloads().length;
     await expect(connectTelegram({

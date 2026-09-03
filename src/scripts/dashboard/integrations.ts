@@ -785,6 +785,7 @@ if (root !== null) {
   const initTelegramTemplateManager = (): void => {
     const panel = root.querySelector<HTMLElement>("[data-telegram-template-panel]");
     if (panel === null || shopPublicId === undefined) return;
+    const templateFeedback = panel.querySelector<HTMLElement>("[data-template-feedback]");
 
     const presetCards = [...panel.querySelectorAll<HTMLElement>("[data-preset-card]")];
     const welcomeInput = panel.querySelector<HTMLTextAreaElement>("#welcome-message-input");
@@ -795,62 +796,95 @@ if (root !== null) {
     const simMenuBtn = panel.querySelector<HTMLElement>("[data-sim-menu-btn]");
 
     let currentPreset = panel.querySelector<HTMLInputElement>("input[name='templatePreset']:checked")?.value ?? "license_vault";
+    let savePending = false;
+
+    const simCopy = (preset: string): { title: string; note: string; menuLabel: string; cartLabel: string; menuBtn: string } => {
+      switch (preset) {
+        case "gaming_topup": return { title: text("simGamingTitle"), note: text("simGamingNote"), menuLabel: text("simGamingCatalog"), cartLabel: text("simCart"), menuBtn: text("simMenu") };
+        case "subscription_slots": return { title: text("simSubscriptionTitle"), note: text("simSubscriptionNote"), menuLabel: text("simSubscriptionCatalog"), cartLabel: text("simCart"), menuBtn: text("simMenu") };
+        case "mini_app_hybrid": return { title: text("simMiniappTitle"), note: text("simMiniappNote"), menuLabel: text("simCatalog"), cartLabel: text("simCart"), menuBtn: text("simStore") };
+        case "vip_community": return { title: text("simVipTitle"), note: text("simVipNote"), menuLabel: text("simJoinVip"), cartLabel: text("simCart"), menuBtn: text("simMenu") };
+        default: return { title: text("simLicenseTitle"), note: text("simLicenseNote"), menuLabel: text("simCatalog"), cartLabel: text("simCart"), menuBtn: text("simMenu") };
+      }
+    };
+
+    // Seller-typed text only ever reaches the preview through textContent —
+    // never innerHTML — so the preview cannot become an injection surface.
+    const simButton = (label: string): HTMLElement => {
+      const button = document.createElement("div");
+      button.className = "sim-button";
+      button.textContent = label;
+      return button;
+    };
 
     const renderSimulator = (): void => {
-      const welcome = welcomeInput?.value.trim() || "Chào mừng bạn đến với Cửa Hàng! Chọn danh mục bên dưới để bắt đầu:";
+      const welcome = welcomeInput?.value.trim() || text("simDefaultWelcome");
       const support = supportInput?.value.trim() || "";
+      const copy = simCopy(currentPreset);
 
       if (simText !== null) {
-        switch (currentPreset) {
-          case "gaming_topup":
-            simText.innerHTML = `🎮 <b>Game & Thẻ Cào Tự Động</b><br/><br/>${welcome}<br/><br/><i>⚡ Trả mã PIN & Serial tức thì qua bot.</i>`;
-            break;
-          case "subscription_slots":
-            simText.innerHTML = `🎬 <b>Tài Khoản & Gói Dịch Vụ</b><br/><br/>${welcome}<br/><br/><i>⚡ Cấp Profile & PIN bảo mật sau khi thanh toán.</i>`;
-            break;
-          case "mini_app_hybrid":
-            simText.innerHTML = `🛍️ <b>Storefront Trực Tuyến</b><br/><br/>${welcome}<br/><br/><i>Bấm Menu góc dưới để mở Cửa hàng toàn màn hình.</i>`;
-            break;
-          case "vip_community":
-            simText.innerHTML = `👑 <b>Cộng Đồng VIP / Hội Viên</b><br/><br/>${welcome}<br/><br/><i>Hệ thống tự động cấp link mời 1-lần vào nhóm kín sau thanh toán.</i>`;
-            break;
-          case "license_vault":
-          default:
-            simText.innerHTML = `🔑 <b>Kho Bản Quyền Số</b><br/><br/>${welcome}<br/><br/><i>⚡ Giao key bản quyền tức thì, copy 1-chạm.</i>`;
-            break;
-        }
+        simText.replaceChildren();
+        const title = document.createElement("b");
+        title.textContent = copy.title;
+        simText.appendChild(title);
+        simText.appendChild(document.createElement("br"));
+        simText.appendChild(document.createElement("br"));
+        simText.appendChild(document.createTextNode(welcome));
+        simText.appendChild(document.createElement("br"));
+        simText.appendChild(document.createElement("br"));
+        const note = document.createElement("i");
+        note.textContent = copy.note;
+        simText.appendChild(note);
       }
 
       if (simKeyboard !== null) {
         simKeyboard.replaceChildren();
         const row1 = document.createElement("div");
         row1.className = "sim-keyboard-row";
-
-        const btnMenu = document.createElement("div");
-        btnMenu.className = "sim-button";
-        btnMenu.textContent = currentPreset === "gaming_topup" ? "🎮 Danh mục" : currentPreset === "subscription_slots" ? "🎬 Dịch vụ" : currentPreset === "vip_community" ? "👑 Tham gia" : "📦 Danh mục";
-
-        const btnCart = document.createElement("div");
-        btnCart.className = "sim-button";
-        btnCart.textContent = currentPreset === "vip_community" ? "💎 Gói VIP" : "🛒 Giỏ hàng";
-
-        row1.appendChild(btnMenu);
-        row1.appendChild(btnCart);
+        row1.appendChild(simButton(copy.menuLabel));
+        row1.appendChild(simButton(copy.cartLabel));
         simKeyboard.appendChild(row1);
-
         if (support.length > 0) {
           const row2 = document.createElement("div");
           row2.className = "sim-keyboard-row";
-          const btnSupport = document.createElement("div");
-          btnSupport.className = "sim-button";
-          btnSupport.textContent = `💬 Hỗ trợ: ${support}`;
-          row2.appendChild(btnSupport);
+          row2.appendChild(simButton(`${text("simSupport")}: ${support}`));
           simKeyboard.appendChild(row2);
         }
       }
 
-      if (simMenuBtn !== null) {
-        simMenuBtn.textContent = currentPreset === "mini_app_hybrid" ? "🛍️ Cửa hàng" : "≡ Menu";
+      if (simMenuBtn !== null) simMenuBtn.textContent = copy.menuBtn;
+    };
+
+    const saveTemplate = async (): Promise<void> => {
+      // shopPublicId is already narrowed to string by the panel guard above.
+      if (saveBtn === null || savePending) return;
+      const supportValue = supportInput === null ? "" : supportInput.value.trim();
+      if (!/^(@[A-Za-z0-9_]{4,64})?$/u.test(supportValue)) {
+        setFeedback(templateFeedback, text("templateSupportInvalid"), "danger");
+        supportInput?.focus();
+        return;
+      }
+      savePending = true;
+      saveBtn.disabled = true;
+      const originalSubmitLabel = saveBtn.textContent;
+      saveBtn.textContent = text("templateSaving");
+      try {
+        await requestApi(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram/menu`, {
+          method: "POST",
+          body: JSON.stringify({
+            supportHandle: supportInput?.value.trim() || null,
+            templatePreset: currentPreset,
+            welcomeMessageCustom: welcomeInput?.value.trim() || null,
+          }),
+        }, createIdempotencyKey("telegram_menu_template"));
+        setFeedback(templateFeedback, text("templateSaved"), "success");
+      } catch (error) {
+        if (isTenantChangedError(error)) return;
+        setFeedback(templateFeedback, `${text("templateSaveFailed")} ${apiErrorMessage(error)}`, "danger");
+      } finally {
+        savePending = false;
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalSubmitLabel;
       }
     };
 
@@ -871,46 +905,8 @@ if (root !== null) {
 
     welcomeInput?.addEventListener("input", renderSimulator);
     supportInput?.addEventListener("input", renderSimulator);
-
     saveBtn?.addEventListener("click", () => {
-      void (async () => {
-        const origText = saveBtn.textContent;
-        saveBtn.disabled = true;
-        saveBtn.textContent = "Đang lưu...";
-
-        try {
-          const csrfCookie = root.dataset.csrfCookieName;
-          const csrfToken = csrfCookie !== undefined ? readCookie(csrfCookie) : null;
-          const response = await fetch(`/api/app/shops/${encodeURIComponent(shopPublicId)}/integrations/telegram/menu`, {
-            body: JSON.stringify({
-              supportHandle: supportInput?.value.trim() || null,
-              templatePreset: currentPreset,
-              welcomeMessageCustom: welcomeInput?.value.trim() || null,
-            }),
-            headers: {
-              "Content-Type": "application/json",
-              ...(csrfToken !== null ? { "X-CSRF-Token": csrfToken } : {}),
-            },
-            method: "POST",
-          });
-
-          if (!response.ok) {
-            throw new Error("Cập nhật template thất bại");
-          }
-
-          saveBtn.textContent = "Đã lưu thành công!";
-          saveBtn.style.backgroundColor = "var(--sln-state-success)";
-          setTimeout(() => {
-            saveBtn.disabled = false;
-            saveBtn.textContent = origText;
-            saveBtn.style.backgroundColor = "";
-          }, 2500);
-        } catch (err) {
-          alert("Lỗi khi cập nhật template: " + (err instanceof Error ? err.message : "Vui lòng thử lại"));
-          saveBtn.disabled = false;
-          saveBtn.textContent = origText;
-        }
-      })();
+      void saveTemplate();
     });
 
     renderSimulator();

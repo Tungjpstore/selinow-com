@@ -147,6 +147,29 @@ const integrationClientCopy = {
   channelExpansionDescriptionZaloOa: t("dashboard.channels.expansion.zalo_oa"),
   channelExpansionDescriptionWhatsapp: t("dashboard.channels.expansion.whatsapp_cloud"),
   channelExpansionDescriptionDiscord: t("dashboard.channels.expansion.discord_bot"),
+  templateSaving: t("dashboard.integrations.telegram_template.saving"),
+  templateSaved: t("dashboard.integrations.telegram_template.saved"),
+  templateSaveFailed: t("dashboard.integrations.telegram_template.save_failed"),
+  templateSupportInvalid: t("dashboard.integrations.telegram_template.support_invalid"),
+  simDefaultWelcome: t("dashboard.integrations.telegram_template.sim_default_welcome"),
+  simMenu: t("dashboard.integrations.telegram_template.sim_menu"),
+  simStore: t("dashboard.integrations.telegram_template.sim_store"),
+  simSupport: t("dashboard.integrations.telegram_template.sim_support"),
+  simCatalog: t("dashboard.integrations.telegram_template.sim_catalog"),
+  simCart: t("dashboard.integrations.telegram_template.sim_cart"),
+  simJoinVip: t("dashboard.integrations.telegram_template.sim_join_vip"),
+  simGamingCatalog: t("dashboard.integrations.telegram_template.sim_gaming_catalog"),
+  simSubscriptionCatalog: t("dashboard.integrations.telegram_template.sim_subscription_catalog"),
+  simLicenseTitle: t("dashboard.integrations.telegram_template.sim_license_title"),
+  simLicenseNote: t("dashboard.integrations.telegram_template.sim_license_note"),
+  simGamingTitle: t("dashboard.integrations.telegram_template.sim_gaming_title"),
+  simGamingNote: t("dashboard.integrations.telegram_template.sim_gaming_note"),
+  simSubscriptionTitle: t("dashboard.integrations.telegram_template.sim_subscription_title"),
+  simSubscriptionNote: t("dashboard.integrations.telegram_template.sim_subscription_note"),
+  simMiniappTitle: t("dashboard.integrations.telegram_template.sim_miniapp_title"),
+  simMiniappNote: t("dashboard.integrations.telegram_template.sim_miniapp_note"),
+  simVipTitle: t("dashboard.integrations.telegram_template.sim_vip_title"),
+  simVipNote: t("dashboard.integrations.telegram_template.sim_vip_note"),
 };
 ---
 
@@ -210,24 +233,25 @@ const integrationClientCopy = {
               <div class="telegram-template-panel" data-telegram-template-panel>
                 <div class="template-panel-header">
                   <div>
-                    <span class="template-badge">Giao diện và Kịch bản Bot theo ngành hàng</span>
-                    <h3>Chọn Preset ngành hàng & Tùy biến Menu</h3>
-                    <p>Tự động tối ưu hoá kịch bản phản hồi, nút tương tác và cách hiển thị phù hợp nhất với mô hình kinh doanh của bạn.</p>
+                    <span class="template-badge">{t("dashboard.integrations.telegram_template.eyebrow")}</span>
+                    <h3>{t("dashboard.integrations.telegram_template.title")}</h3>
+                    <p>{t("dashboard.integrations.telegram_template.description")}</p>
                   </div>
-                  <button class="app-button app-button-primary" type="button" data-action="save-template">Lưu thay đổi</button>
+                  <button class="app-button app-button-primary" type="button" data-action="save-template">{t("dashboard.integrations.telegram_template.save")}</button>
                 </div>
+                <p class="provider-error" data-template-feedback hidden></p>
 
                 <div class="template-panel-body">
                   <div class="template-options-column">
-                    <span class="template-section-label">Ngành hàng sản phẩm số:</span>
+                    <span class="template-section-label">{t("dashboard.integrations.telegram_template.section_label")}</span>
                     <div class="preset-cards-grid">
                       <label class={`preset-card ${telegram.templatePreset === 'license_vault' ? 'active' : ''}`} data-preset-card="license_vault">
                         <input type="radio" name="templatePreset" value="license_vault" checked={telegram.templatePreset === 'license_vault'} />
                         <div class="preset-card-content">
                           <span class="preset-tag">KEY</span>
                           <div>
-                            <strong>Kho Bản Quyền & Phần Mềm</strong>
-                            <p>Software, SaaS, Dev Tools. Giao License Key dạng code 1-chạm copy, hướng dẫn kích hoạt.</p>
+                            <strong>{t("dashboard.integrations.telegram_template.preset_license_name")}</strong>
+                            <p>{t("dashboard.integrations.telegram_template.preset_license_description")}</p>
                           </div>
                         </div>
                       </label>
@@ -237,8 +261,8 @@ const integrationClientCopy = {
                         <div class="preset-card-content">
                           <span class="preset-tag">GAME</span>
                           <div>
-                            <strong>Nạp Game & Thẻ Cào</strong>
-                            <p>Game Card, Giftcard, Xu/Kim Cương. Menu mệnh giá nhanh, trả Mã PIN + Serial tự động.</p>
+                            <strong>{t("dashboard.integrations.telegram_template.preset_gaming_name")}</strong>
+                            <p>{t("dashboard.integrations.telegram_template.preset_gaming_description")}</p>
                           </div>
                         </div>
                       </label>
@@ -248,8 +272,8 @@ const integrationClientCopy = {
                         <div class="preset-card-content">
                           <span class="preset-tag">SLOT</span>
                           <div>
-                            <strong>Tài Khoản Dùng Chung & AI</strong>
-                            <p>Netflix, Spotify, ChatGPT Plus, Claude Pro. Cấp Profile + PIN riêng, nút báo lỗi 1-chạm.</p>
+                            <strong>{t("dashboard.integrations.telegram_template.preset_subscription_name")}</strong>
+                            <p>{t("dashboard.integrations.telegram_template.preset_subscription_description")}</p>
                           </div>
                         </div>
                       </label>
@@ -259,8 +283,8 @@ const integrationClientCopy = {
                         <div class="preset-card-content">
                           <span class="preset-tag">APP</span>
                           <div>
-                            <strong>Cửa Hàng Mini App (Storefront)</strong>
-                            <p>Nhiều danh mục, combo, khoá học. Menu Button tự động mở Webview Mini App toàn màn hình.</p>
+                            <strong>{t("dashboard.integrations.telegram_template.preset_miniapp_name")}</strong>
+                            <p>{t("dashboard.integrations.telegram_template.preset_miniapp_description")}</p>
                           </div>
                         </div>
                       </label>
@@ -270,8 +294,8 @@ const integrationClientCopy = {
                         <div class="preset-card-content">
                           <span class="preset-tag">VIP</span>
                           <div>
-                            <strong>Cộng Đồng Kín & Kênh VIP</strong>
-                            <p>Nhóm tín hiệu, phân tích thị trường, kho tài liệu. Tự động cấp Single-Use Invite Link.</p>
+                            <strong>{t("dashboard.integrations.telegram_template.preset_vip_name")}</strong>
+                            <p>{t("dashboard.integrations.telegram_template.preset_vip_description")}</p>
                           </div>
                         </div>
                       </label>
@@ -279,28 +303,28 @@ const integrationClientCopy = {
 
                     <div class="template-fields-group">
                       <div class="field-item">
-                        <label for="welcome-message-input">Lời chào tùy chỉnh (Welcome Message):</label>
-                        <textarea id="welcome-message-input" name="welcomeMessage" rows="2" placeholder="Ví dụ: Chào mừng bạn đến với {shop}! Chọn sản phẩm bên dưới để nhận hàng tự động:">{telegram.welcomeMessageCustom ?? ""}</textarea>
-                        <small>Dùng <code>{`{shop}`}</code> để chèn tên cửa hàng tự động.</small>
+                        <label for="welcome-message-input">{t("dashboard.integrations.telegram_template.welcome_label")}</label>
+                        <textarea id="welcome-message-input" name="welcomeMessage" rows="2" placeholder={t("dashboard.integrations.telegram_template.sim_default_welcome")}>{telegram.welcomeMessageCustom ?? ""}</textarea>
+                        <small>{t("dashboard.integrations.telegram_template.welcome_help")}</small>
                       </div>
 
                       <div class="field-item">
-                        <label for="support-handle-input">Telegram Admin Hỗ trợ (Support Handle):</label>
+                        <label for="support-handle-input">{t("dashboard.integrations.telegram_template.support_label")}</label>
                         <input id="support-handle-input" name="supportHandle" type="text" placeholder="@admin_support" value={telegram.supportHandle ?? ""} />
-                        <small>Hiển thị nút liên hệ trực tiếp cho khách hàng trên menu bot.</small>
+                        <small>{t("dashboard.integrations.telegram_template.support_help")}</small>
                       </div>
                     </div>
                   </div>
 
                   <div class="template-preview-column">
-                    <span class="preview-label">Mô phỏng tin nhắn Telegram trực quan</span>
+                    <span class="preview-label">{t("dashboard.integrations.telegram_template.preview_label")}</span>
                     <div class="telegram-preview-phone">
                       <div class="telegram-preview-speaker"></div>
                       <div class="telegram-preview-header">
                         <div class="telegram-preview-avatar">BOT</div>
                         <div class="telegram-preview-bot-info">
                           <strong data-sim-bot-name>{telegram.bot?.displayName ?? "Selinow Bot"}</strong>
-                          <span>bot · trực tuyến</span>
+                          <span>{t("dashboard.integrations.telegram_template.sim_online")}</span>
                         </div>
                       </div>
                       <div class="telegram-preview-chat-window">
@@ -312,8 +336,8 @@ const integrationClientCopy = {
                         </div>
                       </div>
                       <div class="telegram-preview-footer">
-                        <span class="telegram-preview-menu-btn" data-sim-menu-btn>Menu</span>
-                        <div class="telegram-preview-input-box">Nhập tin nhắn...</div>
+                        <span class="telegram-preview-menu-btn" data-sim-menu-btn>{t("dashboard.integrations.telegram_template.sim_menu")}</span>
+                        <div class="telegram-preview-input-box">{t("dashboard.integrations.telegram_template.sim_input_placeholder")}</div>
                       </div>
                     </div>
                   </div>

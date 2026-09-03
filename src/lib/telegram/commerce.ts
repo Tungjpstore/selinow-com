@@ -509,11 +509,11 @@ async function menuReply(env: AppBindings, shop: TelegramShop, locale: Supported
       LIMIT 1
     `).bind(shop.id).first<{
       supportHandle: string | null;
-      templatePreset: TelegramTemplatePreset;
+      templatePreset: TelegramTemplatePreset | null;
       welcomeMessageCustom: string | null;
     }>();
     if (configRow !== null) {
-      preset = configRow.templatePreset;
+      preset = configRow.templatePreset ?? "license_vault";
       if (configRow.welcomeMessageCustom !== null) welcomeMessageCustom = configRow.welcomeMessageCustom;
       if (configRow.supportHandle !== null) supportHandle = configRow.supportHandle;
     }
@@ -596,7 +596,7 @@ async function menuReply(env: AppBindings, shop: TelegramShop, locale: Supported
         text: [
           `👑 ${shop.name}`,
           welcome,
-          locale.startsWith("vi") ? "Sau khi thanh toán, hệ thống tự động cấp link mời nhóm VIP." : "Single-use VIP invite link issued automatically after payment.",
+          locale.startsWith("vi") ? "Nhận quyền truy cập cộng đồng VIP sau khi thanh toán." : "VIP community access is granted after payment.",
           telegramText(locale, "menu.prompt"),
         ].join("\n"),
       };

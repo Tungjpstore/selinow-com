@@ -2,6 +2,7 @@ import { AppError } from "../core/errors";
 import { hmacToken } from "../core/crypto";
 import { createId, createOpaqueToken } from "../core/ids";
 import { tryRecordActivationMilestone } from "../analytics/activation";
+import { customDomainTurnstileAdmissionSql } from "../domains/readiness";
 import { resolveActiveEncryptionKey, resolveEncryptionKey } from "../crypto/keyring";
 import type { AppBindings } from "../platform/bindings";
 import { getShopForMember } from "../tenants/store";
@@ -236,8 +237,14 @@ function authorityMatches(
     && (expected.credentialVersion === undefined || authority.activeCredentialVersion === expected.credentialVersion);
 }
 
+// Matches the webhook update-claim staleness window: a 'processing' row left
+// behind by a crashed worker must not block disconnect/rotate forever once its
+// claim window has passed.
+const TELEGRAM_UPDATE_CLAIM_STALE_MS = 15 * 60_000;
+
 async function beginGenerationDrain(env: AppBindings, integration: IntegrationRow): Promise<IntegrationRow> {
   const now = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - TELEGRAM_UPDATE_CLAIM_STALE_MS).toISOString();
   const result = await env.PLATFORM_DB.prepare(`
     UPDATE telegram_integrations
     SET generation_state = 'draining', updated_at = ?
@@ -251,8 +258,9 @@ async function beginGenerationDrain(env: AppBindings, integration: IntegrationRo
           AND telegram_updates.shop_id = telegram_integrations.shop_id
           AND telegram_updates.integration_generation = telegram_integrations.integration_generation
           AND telegram_updates.status = 'processing'
+          AND telegram_updates.updated_at > ?
       )
-  `).bind(now, integration.id, integration.shopId, integration.integrationGeneration, integration.activeCredentialId).run();
+  `).bind(now, integration.id, integration.shopId, integration.integrationGeneration, integration.activeCredentialId, staleBefore).run();
   if (result.meta.changes !== 1) throw new AppError("telegram_integration_busy", 409, ["retry"]);
   return { ...integration, generationState: "draining" };
 }
@@ -295,14 +303,143 @@ function webhookAllowedUpdatesMatch(allowedUpdates: readonly string[]): boolean 
     && allowedUpdates.includes("callback_query");
 }
 
-async function configureProvider(client: TelegramClient, env: AppBindings, integration: IntegrationRow, secret: string, shopDefaultLocale: string): Promise<TelegramWebhookInfo> {
+const TELEGRAM_MENU_CONFIG_ALLOWED_KEYS = new Set(["miniAppUrl", "preset", "quickAmounts", "supportHandle", "welcomeMessageCustom"]);
+const TELEGRAM_WELCOME_MESSAGE_LIMIT = 500;
+const TELEGRAM_MENU_CONFIG_LIMIT = 2000;
+
+function sanitizeTelegramMenuText(value: string | null | undefined, limit: number): string | null {
+  if (value === null || value === undefined) return null;
+  let stripped = "";
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code > 31 && code !== 127) stripped += character;
+  }
+  stripped = stripped.trim();
+  return stripped.length === 0 ? null : stripped.slice(0, limit);
+}
+
+function validateTelegramSupportHandle(value: string | null | undefined): string | null {
+  const sanitized = sanitizeTelegramMenuText(value, 64);
+  if (sanitized === null) return null;
+  if (!/^@[A-Za-z0-9_]{4,64}$/u.test(sanitized)) throw new AppError("validation_failed", 400, ["support_handle_invalid"]);
+  return sanitized;
+}
+
+function parseTelegramMenuConfigJson(value: string | null | undefined): string | null {
+  const raw = sanitizeTelegramMenuText(value, TELEGRAM_MENU_CONFIG_LIMIT);
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new AppError("validation_failed", 400, ["menu_config_json_invalid"]);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new AppError("validation_failed", 400, ["menu_config_json_invalid"]);
+  }
+  for (const key of Object.keys(parsed)) {
+    if (!TELEGRAM_MENU_CONFIG_ALLOWED_KEYS.has(key)) throw new AppError("validation_failed", 400, ["menu_config_json_invalid"]);
+  }
+  return JSON.stringify(parsed);
+}
+
+/**
+ * Canonical buyer-facing storefront hostname for the shop (platform subdomain
+ * or a fully admitted custom domain). Powers the Telegram web_app menu button;
+ * there is no hardcoded platform domain anywhere in this path.
+ */
+async function shopStorefrontHostname(env: AppBindings, shopId: string): Promise<string | null> {
+  const row = await env.PLATFORM_DB.prepare(`
+    SELECT domain.hostname_normalized AS hostname
+    FROM shops
+    INNER JOIN shop_domains AS domain
+      ON domain.id = shops.canonical_domain_id
+      AND domain.shop_id = shops.id
+      AND domain.status = 'active'
+      AND domain.deleted_at IS NULL
+      AND domain.delete_requested_at IS NULL
+      AND (
+        domain.type = 'platform_subdomain'
+        OR (
+          domain.ownership_verified_at IS NOT NULL
+          AND domain.hostname_status = 'active'
+          AND domain.ssl_status = 'active'
+          AND domain.dns_status = 'active'
+          AND (${customDomainTurnstileAdmissionSql("domain")})
+        )
+      )
+    WHERE shops.id = ?
+    LIMIT 1
+  `).bind(shopId).first<{ hostname: string }>();
+  return row?.hostname ?? null;
+}
+
+function telegramMenuButtonForPreset(
+  preset: string,
+  storefrontHostname: string | null,
+  shopLocale: string,
+): { type: "commands" } | { text: string; type: "web_app"; web_app: { url: string } } {
+  if (preset === "mini_app_hybrid" && storefrontHostname !== null) {
+    return {
+      text: shopLocale.startsWith("vi") ? "Cửa hàng" : "Store",
+      type: "web_app",
+      web_app: { url: `https://${storefrontHostname}` },
+    };
+  }
+  return { type: "commands" };
+}
+
+async function recordTelegramMenuSyncFailure(env: AppBindings, integrationId: string, shopId: string): Promise<void> {
+  const now = new Date().toISOString();
+  try {
+    await env.PLATFORM_DB.batch([
+      env.PLATFORM_DB.prepare("UPDATE telegram_integrations SET last_safe_error_code = 'telegram_menu_update_failed', last_checked_at = ?, updated_at = ? WHERE id = ? AND shop_id = ?").bind(now, now, integrationId, shopId),
+      env.PLATFORM_DB.prepare("INSERT INTO audit_logs (id, shop_id, actor_type, actor_id, action, resource_type, resource_id, safe_metadata_json, request_id, created_at) VALUES (?, ?, 'system', NULL, 'telegram.menu_sync_failed', 'telegram_integration', ?, '{}', '', ?)").bind(createId("aud"), shopId, integrationId, now),
+    ]);
+  } catch {
+    // Recording a best-effort sync failure must never break the caller.
+  }
+}
+
+async function syncTelegramMenuButton(input: {
+  client: TelegramClient;
+  env: AppBindings;
+  integration: Pick<IntegrationRow, "id" | "shopId">;
+  preset: string;
+  shopLocale: string;
+}): Promise<void> {
+  try {
+    const storefrontHostname = input.preset === "mini_app_hybrid"
+      ? await shopStorefrontHostname(input.env, input.integration.shopId)
+      : null;
+    await input.client.setChatMenuButton(telegramMenuButtonForPreset(input.preset, storefrontHostname, input.shopLocale));
+  } catch {
+    await recordTelegramMenuSyncFailure(input.env, input.integration.id, input.integration.shopId);
+  }
+}
+
+async function configureProvider(
+  client: TelegramClient,
+  env: AppBindings,
+  integration: IntegrationRow,
+  secret: string,
+  shopDefaultLocale: string,
+  dropPendingUpdates = true,
+): Promise<TelegramWebhookInfo> {
   await client.setMyCommands(telegramCommands(shopDefaultLocale));
   await client.setMyCommands(telegramCommands("en"), "en");
   await client.setMyCommands(telegramCommands("vi-VN"), "vi");
-  await client.setChatMenuButton();
+  // The menu button is cosmetic relative to webhook delivery: a provider-side
+  // failure is recorded and retried on the next save instead of blocking
+  // connect/rotate. Commands above stay fail-closed per the integration contract.
+  const preset = integration.templatePreset ?? "license_vault";
+  await syncTelegramMenuButton({ client, env, integration, preset, shopLocale: shopDefaultLocale });
   const url = webhookUrl(env, integration.webhookPublicId);
   const maxConnections = webhookMaxConnections(env);
-  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], dropPendingUpdates: true, maxConnections, secretToken: secret, url });
+  // drop_pending_updates stays false per the Telegram integration contract so
+  // buyer messages queued during a transient failure or same-bot rotation are
+  // still delivered; only an explicit reset flow may drop them.
+  await client.setWebhook({ allowedUpdates: ["message", "callback_query"], dropPendingUpdates, maxConnections, secretToken: secret, url });
   const info = await client.getWebhookInfo();
   if (info.url !== url || info.maxConnections !== maxConnections || !webhookAllowedUpdatesMatch(info.allowedUpdates)) throw new AppError("telegram_webhook_failed", 409);
   return info;
@@ -733,6 +870,7 @@ export async function updateTelegramMenuConfig(input: {
   env: AppBindings;
   fetcher?: typeof fetch;
   menuConfigJson?: string | null;
+  requestId: string;
   shopPublicId: string;
   supportHandle?: string | null;
   templatePreset: TelegramTemplatePreset;
@@ -755,8 +893,15 @@ export async function updateTelegramMenuConfig(input: {
     throw new AppError("telegram_template_preset_invalid", 400);
   }
 
+  const welcomeMessageCustom = sanitizeTelegramMenuText(input.welcomeMessageCustom, TELEGRAM_WELCOME_MESSAGE_LIMIT);
+  const supportHandle = validateTelegramSupportHandle(input.supportHandle);
+  const menuConfigJson = parseTelegramMenuConfigJson(input.menuConfigJson);
+
   const nowIso = new Date().toISOString();
-  await input.env.PLATFORM_DB.prepare(`
+  // Same generation-fenced mutation shape as every other telegram_integrations
+  // write: a concurrent disconnect/rotate must make this save fail closed
+  // instead of mutating an integration that no longer owns its bot.
+  const saved = await input.env.PLATFORM_DB.prepare(`
     UPDATE telegram_integrations
     SET template_preset = ?,
         welcome_message_custom = ?,
@@ -764,33 +909,31 @@ export async function updateTelegramMenuConfig(input: {
         menu_config_json = ?,
         updated_at = ?
     WHERE id = ? AND shop_id = ?
+      AND active_credential_id IS ?
+      AND generation_state = 'active'
+      AND status IN ('pending', 'active', 'degraded')
   `).bind(
     input.templatePreset,
-    input.welcomeMessageCustom ?? null,
-    input.supportHandle ?? null,
-    input.menuConfigJson ?? null,
+    welcomeMessageCustom,
+    supportHandle,
+    menuConfigJson,
     nowIso,
     integration.id,
-    shopId
+    shopId,
+    integration.activeCredentialId
   ).run();
+  if (saved.meta.changes !== 1) throw new AppError("telegram_integration_busy", 409, ["retry"]);
 
-  // If the integration is active, update commands/menu button with Telegram API
-  if (integration.activeCredentialId !== null && integration.status === "active") {
+  // Push the menu surface to Telegram when a bot is live. Local D1 stays
+  // authoritative; provider-side failures are recorded (health code + audit),
+  // never silently swallowed.
+  if (integration.activeCredentialId !== null && integration.status !== "pending") {
     try {
       const credential = await loadActiveTelegramCredential(input.env, integration.id, shopId);
       const client = new TelegramClient(credential.credentials.botToken, input.fetcher);
-      if (input.templatePreset === "mini_app_hybrid") {
-        const miniAppUrl = `https://${actor.defaultLocale === "vi-VN" || actor.defaultLocale === "vi" ? "selinow.com" : "selinow.com"}/api/channels/telegram-mini-app/launch`;
-        await client.setChatMenuButton({
-          text: actor.defaultLocale === "vi-VN" || actor.defaultLocale === "vi" ? "Cửa hàng" : "Store",
-          type: "web_app",
-          web_app: { url: miniAppUrl },
-        }).catch(() => undefined);
-      } else {
-        await client.setChatMenuButton().catch(() => undefined);
-      }
+      await syncTelegramMenuButton({ client, env: input.env, integration, preset: input.templatePreset, shopLocale: actor.defaultLocale });
     } catch {
-      // Best-effort remote menu update; local DB update is authoritative
+      await recordTelegramMenuSyncFailure(input.env, integration.id, shopId);
     }
   }
 

@@ -52,6 +52,7 @@ export const POST: APIRoute = async ({ locals, params, request }) => {
     const integration = await updateTelegramMenuConfig({
       env,
       menuConfigJson,
+      requestId: locals.requestId,
       shopPublicId: requireResourceId(params.shopPublicId, "shop"),
       supportHandle,
       templatePreset,
