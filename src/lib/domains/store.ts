@@ -134,7 +134,9 @@ type DomainActor = {
 };
 
 const DOMAIN_LEASE_MS = 90_000;
-const DOMAIN_CLAIM_TTL_MS = 30 * 60_000;
+// TXT propagation at common registrars regularly exceeds 30 minutes; a 24h
+// window lets sellers finish without re-claiming (and re-creating the record).
+const DOMAIN_CLAIM_TTL_MS = 24 * 60 * 60_000;
 
 export type DomainView = {
   activatedAt: string | null;

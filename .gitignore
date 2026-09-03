@@ -26,3 +26,4 @@ art-raw/
 
 # IDE config (IntelliJ/WebStorm)
 .idea/
+artifacts-tmp/

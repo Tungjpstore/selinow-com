@@ -29,6 +29,20 @@ Last updated: 2026-09-04
     - Verified that clicking publish on an unready draft shop NEVER sets `"Lưu lỗi"` or `"Save failed"`, transitions to `"Chưa thể xuất bản"`, displays the notice banner, and opens the blockers modal with actionable links.
   - Verified `npm run check` (0 errors, 0 warnings), `npm run lint` (clean), `npm run build` (success), and `npm run deploy:dry-run` (success).
 
+## Seller operations fixes: pending-payment draft setup, domain claim window (2026-09-04)
+
+Reproduced in the local dashboard with a first shop (`trialing`) and a second shop (`pending_payment`, the state every non-first shop starts in).
+
+- **Root cause of "Lưu lỗi" / `subscription_payment_required` on second shops**: `getShopForMember` defaults every non-read capability to the `mutation` action, which `pending_payment` denies. Draft-stage services that never touch the live storefront now pass `subscriptionAction: "draft_setup"` (the same action `onboarding/*`, `catalog/store.ts` and `updateShopProfile` already used):
+  - `src/lib/tenants/storefront-settings.ts` — `updateSellerStorefrontSettings` (store builder "Save draft") and `updateShopLowStockThreshold`. `publishSellerStorefrontSettings` is unchanged: publishing still fails closed through readiness (`subscription_publishable`).
+  - `src/lib/catalog/channel-visibility.ts` — `listCatalogChannelVisibility` / `setCatalogChannelVisibility`. The products page previously showed "Could not read channel visibility (subscription_payment_required)" on pending-payment shops.
+  - `src/lib/media/assets.ts` — product image upload authorization.
+- **Custom-domain ownership claim window**: `DOMAIN_CLAIM_TTL_MS` raised from 30 minutes to 24 hours in `src/lib/domains/store.ts`. TXT propagation commonly exceeds 30 minutes, so sellers hit "Verification expired" and had to re-claim and re-create the record. Expiry tests in `tests/unit/domain-store.test.ts` moved to 25 hours.
+- **Verified not bugs (local)**: category/product creation, license-key import (`preview` + `import` return 200/201 for an active variant), custom-domain claim + TXT check (`domain_ownership_not_verified` until the record exists), shop rename via `PATCH /api/app/shops/{id}`. PayOS connect fails in the sandbox only because there is no reachable provider; the fail-closed path is intended.
+- **Tests added**: pending-payment draft save (`tests/unit/storefront-templates.test.ts`), pending-payment channel-visibility read/write (`tests/unit/catalog-channel-visibility.test.ts`).
+- **Verification**: `npm run check` (0 errors), `npm run lint` (clean), targeted vitest files (domain-store, storefront-templates, catalog-channel-visibility, shop-country-service, dashboard-domains-ui, domain-check-route, catalog-entitlement) pass.
+- **Docs**: the `pending_payment` row in `docs/PRICING_BILLING_IMPLEMENTATION_SPEC.md` now states draft setup is allowed while publish, checkout and provider setup stay denied.
+
 ## Cross-Branch Consolidation & Production Release (2026-09-04)
 
 - **Branches Merged & Synchronized**:

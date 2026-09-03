@@ -58,7 +58,7 @@ async function authorizeMediaUpload(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<{ limitsJson: string; shopId: string }> {
-  const member = await getShopForMember({ capability: "catalog:manage", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const member = await getShopForMember({ capability: "catalog:manage", env: input.env, shopPublicId: input.shopPublicId, subscriptionAction: "draft_setup", userId: input.userId });
   if (member.row.shop_status !== "active" && member.row.shop_status !== "draft") {
     throw new AppError("shop_inactive", 409);
   }

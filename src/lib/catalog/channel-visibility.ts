@@ -132,10 +132,13 @@ export async function listCatalogChannelVisibility(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<readonly CatalogChannelVisibility[]> {
+  // Channel visibility is draft-stage catalog setup; pending-payment shops may
+  // configure it before checkout. Publishing is gated separately by readiness.
   const actor = await getShopForMember({
     capability: "catalog:manage",
     env: input.env,
     shopPublicId: input.shopPublicId,
+    subscriptionAction: "draft_setup",
     userId: input.userId,
   });
   const rows = await input.env.PLATFORM_DB.prepare(`
@@ -187,6 +190,7 @@ export async function setCatalogChannelVisibility(input: {
     capability: "catalog:manage",
     env: input.env,
     shopPublicId: input.shopPublicId,
+    subscriptionAction: "draft_setup",
     userId: input.userId,
   });
   const product = await input.env.PLATFORM_DB.prepare(`

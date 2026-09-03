@@ -236,6 +236,25 @@ describe("catalog channel visibility", () => {
     })).find((row) => row.channelCode === "telegram.mini_app")).toMatchObject({ status: "hidden", version: 1 });
   });
 
+  it("keeps channel visibility readable and editable for a pending-payment shop", async () => {
+    const runtime = createRuntime();
+    runtime.database.prepare("UPDATE shop_subscriptions SET state = 'pending_payment', current_period_end = NULL WHERE id = 'sub-visibility-a'").run();
+    const listed = await listCatalogChannelVisibility({ env: runtime.env, shopPublicId: "shop-visibility-public-a", userId: "user-visibility-owner" });
+    expect(listed.length).toBeGreaterThan(0);
+    const written = await setCatalogChannelVisibility({
+      channelCode: "telegram",
+      env: runtime.env,
+      expectedVersion: 0,
+      idempotencyKey: "visibility-pending-0001",
+      productId: PRODUCT_A,
+      requestId: "request-visibility-pending-0001",
+      shopPublicId: "shop-visibility-public-a",
+      userId: "user-visibility-owner",
+      visible: true,
+    });
+    expect(written).toMatchObject({ replayed: false, projection: { channelCode: "telegram", status: "visible" } });
+  });
+
   it("does not expose products hidden from the website projection", async () => {
     const runtime = createRuntime();
     const now = "2026-08-03T00:00:00.001Z";

@@ -349,6 +349,27 @@ describe("seller template selection contract", () => {
     expect(settings.templates.map((template) => template.id)).toEqual(["swift", "pulse", "desk"]);
   });
 
+  it("lets a pending-payment shop keep saving the storefront draft", async () => {
+    const database = createDatabase();
+    seedTenant(database.database);
+    database.database.prepare(`
+      UPDATE shop_subscriptions
+      SET state = 'pending_payment', current_period_end = NULL, trial_ends_at = NULL, version = version + 1
+      WHERE id = 'sub-a'
+    `).run();
+    const env = appEnv(database);
+    const settings = await updateSellerStorefrontSettings({
+      data: { headline: "Coming soon" },
+      env,
+      expectedVersion: 1,
+      shopPublicId: "public-a",
+      userId: "user-a",
+    });
+    expect(settings.version).toBe(2);
+    // Draft edits stay allowed before payment; premium features remain gated.
+    expect(settings.premiumTemplatesEnabled).toBe(false);
+  });
+
   it("persists a valid template selection and returns the vertical-scoped gallery", async () => {
     const database = createDatabase();
     seedTenant(database.database);

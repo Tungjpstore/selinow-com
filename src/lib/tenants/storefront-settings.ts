@@ -155,7 +155,7 @@ export async function updateShopLowStockThreshold(input: {
   threshold: number;
   userId: string;
 }): Promise<{ lowStockThreshold: number; version: number }> {
-  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, subscriptionAction: "draft_setup", userId: input.userId });
   // Matches the shop_settings CHECK constraint (low_stock_threshold >= 0);
   // the column already exists in migration 0002, so no schema change is needed.
   if (!Number.isSafeInteger(input.threshold) || input.threshold < 0 || input.threshold > LOW_STOCK_THRESHOLD_MAX) {
@@ -182,7 +182,9 @@ export async function updateSellerStorefrontSettings(input: {
   shopPublicId: string;
   userId: string;
 }): Promise<SellerStorefrontSettings> {
-  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, userId: input.userId });
+  // Draft edits never touch the live storefront, so a pending-payment shop may
+  // keep building; publishing is gated separately by readiness.
+  const member = await getShopForMember({ capability: "shop:update", env: input.env, shopPublicId: input.shopPublicId, subscriptionAction: "draft_setup", userId: input.userId });
   const premiumTemplatesEnabled = hasFeature(member.row.feature_flags_json, PREMIUM_STOREFRONT_TEMPLATES_FEATURE);
   const version = expectedVersion(input.expectedVersion);
   const existing = await input.env.PLATFORM_DB.prepare(`

@@ -83,7 +83,7 @@ scheduled reconciliation.
 | State | Dashboard | Provider setup | Publish/checkout |
 | --- | --- | --- | --- |
 | `trialing` | setup and plan-limited operation | according to readiness | yes until `trial_ends_at` |
-| `pending_payment` | conversion checkout only | no new provider setup | no |
+| `pending_payment` | draft setup (catalog, storefront draft, profile) and conversion checkout | no new provider setup | no |
 | `active` | full plan/role policy | according to plan/provider | yes |
 | `past_due` | full read and operational work | no new high-risk setup | yes until grace deadline |
 | `grace_period` | full read and operational work | no new high-risk setup | yes until `grace_ends_at` |
