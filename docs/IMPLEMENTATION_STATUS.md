@@ -1,8 +1,44 @@
 # Implementation Status
 
-Last updated: 2026-08-15
+Last updated: 2026-09-03
 
 ## Current source of truth
+
+Production Deploy Gate Unblock — `audit_high` vulnerability (2026-09-03):
+The `release:production:dry-run` pipeline (`scripts/release-dry-run.mjs`) was
+blocked at its `audit_high` step. `npm audit --audit-level=high` reported two
+high-severity advisories against `fast-uri@3.1.5` (with `ajv` flagged only for
+depending on it), because the repository's own `overrides` entry pinned the
+package to `3.1.5`, which is inside the vulnerable `3.0.0 - 3.1.5` range
+(GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf,
+GHSA-jqff-g426-hqxp).
+
+- **Fix**: Bumped the `overrides.fast-uri` pin from `3.1.5` to `3.1.7`
+  (patched 3.x line, satisfies `ajv@8.20.0`'s declared `^3.0.1` range) and
+  regenerated `package-lock.json`. `fast-uri` is a dev-tooling transitive
+  dependency only (`@astrojs/check` → language-server → yaml-language-server →
+  ajv, marked `"dev": true`); it is not part of the deployed Cloudflare Worker
+  bundle, so this is a supply-chain/audit-gate fix with no runtime behavior
+  change.
+- **Verification**: `npm ci` (0 vulnerabilities), `npm audit --audit-level=high`
+  (exit 0, found 0 vulnerabilities), `npm run check` (809 files, 0 errors),
+  `npm run lint` (clean), `npm run test` (313 files, 2450 tests passing),
+  `npm run build`, `npm run build:staging`, `npm run deploy:dry-run`,
+  `npm run deploy:staging:dry-run`, and `git diff --check` all pass.
+- **Remaining production gates are operational, not code defects**:
+  `scripts/release-doctor.mjs` still reports `ok:false`, but every failing check
+  is an `evidence.*`, `secret.*`, or `approval.*` item that requires real
+  Cloudflare Worker secrets and signed acceptance/rollback/backup artifacts that
+  do not exist in a build sandbox (e.g. `secret.CLOUDFLARE_API_TOKEN`,
+  `evidence.staging.accepted`, `evidence.rollback.candidate.rehearsalPassed`,
+  `evidence.approvals.*`). These are release sign-offs owned by the operator
+  during an actual production run and are expected to be empty here.
+- **External requirements** to complete a real production deploy (unchanged by
+  this fix): provisioned Cloudflare Worker secrets, a signed staging acceptance
+  manifest, a rehearsed rollback candidate, backup/restore drill evidence, and
+  the five owner approvals enumerated by `release-doctor`.
+- **Known limitations**: This change clears the automated code/dependency gate
+  only; it does not and cannot produce the operator-owned evidence artifacts.
 
 Landing Page & Visual Commerce Flow Modernization (2026-08-15):
 The public landing page and marketing surface have been comprehensively overhauled with an interactive visual commerce operating system theme:
