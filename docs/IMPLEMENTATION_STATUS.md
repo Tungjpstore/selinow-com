@@ -2,6 +2,23 @@
 
 Last updated: 2026-09-04
 
+## Cross-Branch Consolidation & Production Release (2026-09-04)
+
+- **Branches Merged & Synchronized**:
+  - Merged remote `origin/codex/landing-page-deploy-20260801` cleanly into `main` (commit `9f9086c`), resolving and closing PR #3.
+  - Pushed unified HEAD to both `main` and `codex/landing-page-deploy-20260801` on GitHub.
+  - Test timeout extended for parallel load in `tests/unit/booking-appointment-checkout.test.ts` (commit `c2c736c`).
+- **Production Verification**:
+  - `npm run check`: 0 errors, 0 warnings (1,023 files checked).
+  - `npm run lint`: 0 errors, 0 warnings.
+  - `npm run test`: 378 test files, 3,099 tests passed (100%).
+  - `npm run build`: built production server and client bundles.
+  - `npm run deploy:dry-run`: validated Cloudflare assets and bindings.
+  - Remote D1: 124/124 migrations verified (`No migrations to apply`).
+- **Cloudflare Worker Production Deployment**:
+  - Deployed Worker Version ID: `d26c76c0-2a35-4fc0-a29f-a037e941631a`.
+  - Verified live health endpoints: `https://selinow.com/api/health` and `https://app.selinow.com/api/health` (HTTP 200 OK, phase 10).
+
 ## Hardening & Upgrade Batch: Telegram menu fencing, storefront KV resolver, discounts UI, publish blockers (2026-09-04)
 
 Committed as `f469c38` (Telegram hardening) and `e0c13ff` (storefront upgrades), plus the contract-test fix and this docs entry.
