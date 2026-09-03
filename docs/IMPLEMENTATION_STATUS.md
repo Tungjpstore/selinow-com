@@ -2,6 +2,33 @@
 
 Last updated: 2026-09-04
 
+## Storefront Publication Error Handling & Chrome E2E Verification (2026-09-04)
+
+- **Root Cause Analysis**:
+  - In `src/scripts/dashboard/store-builder.ts`, when publishing a storefront draft, any API failure (including HTTP 409 `readiness_failed` when a shop has not completed required onboarding steps like PayOS, inventory fulfillment, policies, or Telegram) triggered `setState("failed")`.
+  - `setState("failed")` updated the page header badge `[data-save-state]` with `text("failed")` = `"Lưu lỗi"` ("Save failed"), erroneously confusing the seller into thinking saving the draft had failed, even though the draft was safely persisted in D1.
+  - Additionally, blocker details were only appended to `feedback` at the bottom of the long form (`.settings-footer`), which was off-screen when the seller clicked "Publish bản nháp" in the header.
+- **Changes & Improvements**:
+  - **Distinct Publication States**: Separated draft save errors (`failed` -> `"Lưu lỗi"`) from storefront publication errors:
+    - Added `publish_blocked` state (`data-state="publish_blocked"`) mapped to `"Chưa thể xuất bản"` (VI) / `"Publish blocked"` (EN).
+    - Added `publish_failed` state (`data-state="publish_failed"`) mapped to `"Xuất bản lỗi"` (VI) / `"Publish failed"` (EN).
+    - Under no circumstances does a publish action display `"Lưu lỗi"`.
+  - **High-Visibility Readiness Blockers Dialog & Banner**:
+    - Added `<dialog class="publish-dialog" data-publish-dialog>` modal dialog that opens immediately upon `readiness_failed`.
+    - Lists each failing required check with red indicator, human-friendly localized title, and direct configuration action links (`/onboarding#inventory`, `/onboarding#payos`, `/onboarding#telegram`, `/onboarding#policies`, etc.).
+    - Added persistent contextual banner `<aside class="publish-notice-banner" data-publish-notice-banner>` right under the page header so sellers can reference blockers without losing context.
+    - Added localized toast notifications (`showToast`) for publish blockers (warning) and success (success).
+  - **Accessibility**:
+    - Fixed WCAG `scrollable-region-focusable` issue in `src/pages/app/products.astro` for `.discount-table-wrap` on mobile viewports (`tabindex="0"`, `role="region"`, `aria-labelledby`).
+    - Complied with console design contracts (1px hairline borders, font weight <= 600, no raw emojis, semantic CSS tokens `var(--sln-...)`).
+- **Verification & Chrome E2E Tests**:
+  - Added dedicated unit tests in `tests/unit/store-builder-publication-ui.test.ts`.
+  - Added interactive Chrome E2E regression assertion in `tests/authenticated/local-authenticated.spec.ts`.
+  - Executed full suite in **Google Chrome**:
+    - `npm run test:browser:auth:local`: **9/9 tests passed** (desktop Chrome, mobile Chrome, tablet Chrome, minimum viewport Chrome, 200% zoom Chrome).
+    - Verified that clicking publish on an unready draft shop NEVER sets `"Lưu lỗi"` or `"Save failed"`, transitions to `"Chưa thể xuất bản"`, displays the notice banner, and opens the blockers modal with actionable links.
+  - Verified `npm run check` (0 errors, 0 warnings), `npm run lint` (clean), `npm run build` (success), and `npm run deploy:dry-run` (success).
+
 ## Cross-Branch Consolidation & Production Release (2026-09-04)
 
 - **Branches Merged & Synchronized**:

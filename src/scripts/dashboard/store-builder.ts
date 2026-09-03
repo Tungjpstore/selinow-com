@@ -1,4 +1,5 @@
 import { MIN_STOREFRONT_CONTRAST, validateStorefrontContrast, type StorefrontContrastValidation } from "./store-builder-contrast";
+import { showToast } from "../lib/toast";
 
 type StorefrontDraft = {
   accentColor: string;
@@ -108,6 +109,44 @@ if (builder !== null) {
     const contrast = builder.querySelector<HTMLElement>("[data-contrast]");
     const mobileViewTabs = [...builder.querySelectorAll<HTMLButtonElement>("[data-builder-view-tab]")];
 
+    const publishDialog = builder.querySelector<HTMLDialogElement>("[data-publish-dialog]");
+    const publishDialogBlockers = builder.querySelector<HTMLElement>("[data-publish-dialog-blockers]");
+    const publishNoticeBanner = builder.querySelector<HTMLElement>("[data-publish-notice-banner]");
+    const noticeBlockersList = builder.querySelector<HTMLElement>("[data-notice-blockers-list]");
+
+    const dismissNoticeButton = builder.querySelector<HTMLButtonElement>("[data-dismiss-notice]");
+    dismissNoticeButton?.addEventListener("click", () => {
+      if (publishNoticeBanner !== null) publishNoticeBanner.hidden = true;
+    });
+
+    const closeDialogButtons = builder.querySelectorAll<HTMLButtonElement>("[data-close-publish-dialog]");
+    closeDialogButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        publishDialog?.close();
+      });
+    });
+
+    const dismissPublishErrors = (): void => {
+      if (publishNoticeBanner !== null) publishNoticeBanner.hidden = true;
+      publishDialog?.close();
+    };
+
+    const CHECK_ACTION_URLS: Record<string, string> = {
+      catalog_ready: "/onboarding#catalog",
+      channel_entitlements: "/onboarding#channels",
+      channel_selected: "/onboarding#channels",
+      custom_domain_ready: "/app/domains",
+      fulfillment_ready: "/onboarding#inventory",
+      integration_health: "/onboarding#readiness",
+      payos_ready: "/onboarding#payos",
+      platform_domain_ready: "/onboarding#domain",
+      policies_ready: "/onboarding#policies",
+      shop_state_publishable: "/app",
+      storefront_ready: "/app/store",
+      subscription_publishable: "/app/billing",
+      telegram_ready: "/onboarding#telegram",
+    };
+
     const readCookie = (name: string): string | null => {
       const raw = document.cookie.split(";")
         .map((part) => part.trim())
@@ -170,6 +209,8 @@ if (builder !== null) {
         unsaved: text("unsaved"),
         unpublished_changes: text("unpublishedChanges"),
         invalid_contrast: text("invalidContrast"),
+        publish_blocked: text("publishBlocked") || "Chưa thể xuất bản",
+        publish_failed: text("publishFailedBadge") || "Xuất bản lỗi",
       };
       saveState.dataset.state = state;
       saveState.textContent = labels[state] ?? state;
@@ -182,7 +223,7 @@ if (builder !== null) {
     // Reads the owner-scoped readiness projection and lists every failed
     // required check so the seller sees WHY publishing is blocked.
     const renderPublishBlockers = async (): Promise<void> => {
-      if (feedback === null || !shopPublicId) return;
+      if (!shopPublicId) return;
       try {
         const response = await fetch(`/api/app/shops/${encodeURIComponent(shopPublicId)}/readiness`, { credentials: "same-origin" });
         const payload: unknown = await response.json().catch(() => null);
@@ -196,18 +237,74 @@ if (builder !== null) {
           && typeof (item as JsonObject).code === "string");
         if (blockers.length === 0) return;
         const labels: unknown = copy.readinessCheckLabels;
-        const list = document.createElement("ul");
-        list.className = "publish-blockers";
-        for (const check of blockers) {
-          const item = document.createElement("li");
-          const code = String(check.code);
-          const label = typeof labels === "object" && labels !== null && typeof (labels as JsonObject)[code] === "string"
-            ? (labels as JsonObject)[code] as string
-            : code;
-          item.textContent = label;
-          list.appendChild(item);
+
+        if (feedback !== null) {
+          const list = document.createElement("ul");
+          list.className = "publish-blockers";
+          for (const check of blockers) {
+            const item = document.createElement("li");
+            const code = String(check.code);
+            const label = typeof labels === "object" && labels !== null && typeof (labels as JsonObject)[code] === "string"
+              ? (labels as JsonObject)[code] as string
+              : code;
+            item.textContent = label;
+            list.appendChild(item);
+          }
+          feedback.appendChild(list);
         }
-        feedback.appendChild(list);
+
+        if (publishNoticeBanner !== null && noticeBlockersList !== null) {
+          noticeBlockersList.replaceChildren();
+          for (const check of blockers) {
+            const code = String(check.code);
+            const label = typeof labels === "object" && labels !== null && typeof (labels as JsonObject)[code] === "string"
+              ? (labels as JsonObject)[code] as string
+              : code;
+            const actionUrl = CHECK_ACTION_URLS[code] ?? "/onboarding";
+            const li = document.createElement("li");
+            li.textContent = label + " — ";
+            const a = document.createElement("a");
+            a.href = actionUrl;
+            a.textContent = text("publishBlockersActionFix") || "Cấu hình";
+            li.appendChild(a);
+            noticeBlockersList.appendChild(li);
+          }
+          publishNoticeBanner.hidden = false;
+        }
+
+        if (publishDialog !== null && publishDialogBlockers !== null) {
+          publishDialogBlockers.replaceChildren();
+          for (const check of blockers) {
+            const code = String(check.code);
+            const label = typeof labels === "object" && labels !== null && typeof (labels as JsonObject)[code] === "string"
+              ? (labels as JsonObject)[code] as string
+              : code;
+            const actionUrl = CHECK_ACTION_URLS[code] ?? "/onboarding";
+            const li = document.createElement("li");
+
+            const info = document.createElement("div");
+            info.className = "blocker-info";
+            const dot = document.createElement("span");
+            dot.className = "blocker-dot";
+            const name = document.createElement("span");
+            name.className = "blocker-name";
+            name.textContent = label;
+            info.appendChild(dot);
+            info.appendChild(name);
+
+            const actionLink = document.createElement("a");
+            actionLink.className = "blocker-action";
+            actionLink.href = actionUrl;
+            actionLink.textContent = text("publishBlockersActionFix") || "Cấu hình";
+
+            li.appendChild(info);
+            li.appendChild(actionLink);
+            publishDialogBlockers.appendChild(li);
+          }
+          if (typeof publishDialog.showModal === "function") {
+            publishDialog.showModal();
+          }
+        }
       } catch {
         // Blocker detail is best-effort; the readiness_failed notice stands.
       }
@@ -393,18 +490,21 @@ if (builder !== null) {
         });
         saved = next;
         draftVersion = response.settings.version;
-        publicationState = response.settings.publicationState;
         builder.dataset.draftVersion = String(draftVersion);
         builder.dataset.publicationState = publicationState;
         setState(publicationState);
         updatePublicationBadge();
         setFeedback(text("saveSuccess"));
+        showToast(text("saveSuccess"), "success");
+        dismissPublishErrors();
         updateControls(saved);
       } catch (error) {
         setState("failed");
-        setFeedback(error instanceof Error && error.message === "resource_conflict"
+        const msg = error instanceof Error && error.message === "resource_conflict"
           ? text("conflictReload")
-          : error instanceof Error ? text("saveError", { error: error.message }) : text("saveFailed"));
+          : error instanceof Error ? text("saveError", { error: error.message }) : text("saveFailed");
+        setFeedback(msg);
+        showToast(msg, "danger");
         saveButton.disabled = false;
         if (undoButton !== null) undoButton.disabled = false;
       }
@@ -418,11 +518,14 @@ if (builder !== null) {
       const validation = updateContrast(next);
       if (!validation.valid) {
         setState("invalid_contrast");
-        setFeedback(contrastMessage(validation));
+        const msg = contrastMessage(validation);
+        setFeedback(msg);
+        showToast(msg, "danger");
         return;
       }
       if (hasChanges(next)) {
         setFeedback(text("saveBeforePublish"));
+        showToast(text("saveBeforePublish"), "warning");
         return;
       }
       publishButton.disabled = true;
@@ -437,17 +540,22 @@ if (builder !== null) {
         setState(publicationState);
         updatePublicationBadge();
         setFeedback(text("publishSuccess"));
+        showToast(text("publishSuccess"), "success");
+        dismissPublishErrors();
       } catch (error) {
-        setState("failed");
         const errorCode = error instanceof Error ? error.message : "";
         if (errorCode === "readiness_failed") {
-          // Surface each failed required readiness check instead of the raw 409.
+          setState("publish_blocked");
           setFeedback(text("publishBlockers"));
+          showToast(text("publishBlockers"), "warning");
           await renderPublishBlockers();
         } else {
-          setFeedback(error instanceof Error && errorCode === "resource_conflict"
+          setState("publish_failed");
+          const msg = error instanceof Error && errorCode === "resource_conflict"
             ? text("publishConflict")
-            : error instanceof Error ? text("publishError", { error: errorCode }) : text("publishFailed"));
+            : error instanceof Error ? text("publishError", { error: errorCode }) : text("publishFailed");
+          setFeedback(msg);
+          showToast(msg, "danger");
         }
         publishButton.disabled = false;
       }

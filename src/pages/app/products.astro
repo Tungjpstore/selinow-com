@@ -287,7 +287,7 @@ const selectedVariants = selectedProduct === undefined ? [] : productVariants.ge
             <button class="sln-button" data-variant="secondary" type="button" data-open-discount-form>{t("dashboard.discounts.action.create")}</button>
           </div>
           <p class="dialog-copy" data-discounts-feedback hidden></p>
-          <div class="discount-table-wrap">
+          <div class="discount-table-wrap" tabindex="0" role="region" aria-labelledby="discount-ledger-title">
             <table class="discount-table">
               <thead>
                 <tr>

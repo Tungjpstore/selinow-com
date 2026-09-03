@@ -346,7 +346,7 @@ test("local magic link confirms safely when the requester cookie is unavailable"
 
 test("local magic link opens deterministic authenticated seller surfaces", async ({ page }, testInfo) => {
   const runtimeIssues: string[] = [];
-  let expectedErrorPath: string | null = null;
+  let expectedErrorPath: string | RegExp | null = null;
   let expectedErrorStatus: number | null = null;
   page.on("console", (message) => {
     if (
@@ -368,7 +368,7 @@ test("local magic link opens deterministic authenticated seller surfaces", async
     } catch {
       // Keep the raw URL only when Playwright returns an invalid response URL.
     }
-    if (response.status() === expectedErrorStatus && pathname === expectedErrorPath) return;
+    if (response.status() === expectedErrorStatus && (expectedErrorPath instanceof RegExp ? expectedErrorPath.test(pathname) : pathname === expectedErrorPath)) return;
     runtimeIssues.push(`response_${String(response.status())}: ${pathname}`);
   });
 
@@ -441,6 +441,43 @@ test("local magic link opens deterministic authenticated seller surfaces", async
       });
     } else {
       await expect(page).toHaveScreenshot(route.screenshot, { fullPage: false });
+    }
+  }
+
+  // Verify storefront publish readiness flow:
+  // When a draft shop without complete readiness clicks publish,
+  // it must NEVER display "Lưu lỗi" / "Save failed", and must surface
+  // readiness blockers clearly via the status badge and blocker UI.
+  expectedErrorPath = /\/api\/app\/shops\/[^/]+\/storefront\/publish/u;
+  expectedErrorStatus = 409;
+  const storeResponse = await page.goto("/app/store");
+  expect(storeResponse?.status()).toBe(200);
+
+  const saveState = page.locator("[data-save-state]");
+  await expect(saveState).toBeVisible();
+
+  const publishBtn = page.locator("[data-publish]");
+  if (await publishBtn.isVisible()) {
+    await publishBtn.click();
+
+    // Critical assertion: MUST NEVER SAY "Lưu lỗi" / "Save failed"
+    await expect(saveState).not.toHaveText("Lưu lỗi");
+    await expect(saveState).not.toHaveText("Save failed");
+    await expect(saveState).toHaveAttribute("data-state", "publish_blocked");
+    await expect(saveState).toHaveText("Chưa thể xuất bản");
+
+    // The publish notice banner should be displayed
+    const noticeBanner = page.locator("[data-publish-notice-banner]");
+    await expect(noticeBanner).toBeVisible();
+    await expect(noticeBanner.locator("[data-notice-title]")).toContainText("Chưa thể xuất bản");
+
+    // The dialog should show readiness blockers
+    const dialog = page.locator("[data-publish-dialog]");
+    if (await dialog.isVisible()) {
+      const blockers = dialog.locator("[data-publish-dialog-blockers] li");
+      await expect(blockers.first()).toBeVisible();
+      const closeBtn = dialog.locator("[data-close-publish-dialog]").first();
+      await closeBtn.click();
     }
   }
 

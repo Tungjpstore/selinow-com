@@ -141,8 +141,15 @@ const storeBuilderClientCopy = {
   publishSuccess: t("dashboard.store_builder.runtime.publish_success"),
   publishConflict: t("dashboard.store_builder.runtime.publish_conflict"),
   publishError: t("dashboard.store_builder.runtime.publish_error", { error: "__ERROR__" }),
-  publishFailed: t("dashboard.store_builder.runtime.publish_failed"),
   publishBlockers: t("dashboard.store_builder.runtime.publish_blockers"),
+  publishBlocked: t("dashboard.store_builder.runtime.publish_blocked"),
+  publishFailedBadge: t("dashboard.store_builder.runtime.publish_failed_badge"),
+  publishBlockersTitle: t("dashboard.store_builder.blockers_dialog.title"),
+  publishBlockersDescription: t("dashboard.store_builder.blockers_dialog.description"),
+  publishBlockersActionOnboarding: t("dashboard.store_builder.blockers_dialog.action_onboarding"),
+  publishBlockersActionFix: t("dashboard.store_builder.blockers_dialog.action_fix"),
+  publishBlockersClose: t("dashboard.store_builder.blockers_dialog.close"),
+  publishBlockersRequired: t("dashboard.store_builder.blockers_dialog.required_badge"),
   readinessCheckLabels: Object.fromEntries([
     "catalog_ready",
     "channel_entitlements",
@@ -183,6 +190,37 @@ const storeBuilderClientCopy = {
     <WorkspaceState title={settingsError === "authorization_denied" ? t("dashboard.store_builder.forbidden.title") : t("dashboard.store_builder.unavailable.title")} description={settingsError === "authorization_denied" ? t("dashboard.store_builder.forbidden.description") : t("dashboard.store_builder.unavailable.description")} actionHref={workspaceHref(settingsError === "authorization_denied" ? "/app" : "/onboarding")} actionLabel={settingsError === "authorization_denied" ? t("dashboard.store_builder.back_overview") : t("dashboard.store_builder.open_readiness")} tone={settingsError === "authorization_denied" ? "warning" : "danger"} />
   ) : (
     <div class="builder" data-builder data-store-builder data-mobile-view="settings" data-locale={locale ?? "en"} data-copy={JSON.stringify(storeBuilderClientCopy)} data-can-manage={canManage ? "true" : "false"} data-can-publish={canPublish ? "true" : "false"} data-draft-version={String(settings.version)} data-publication-state={settings.publicationState} data-shop-public-id={shop.publicId} data-csrf-cookie-name={`${env.SESSION_COOKIE_NAME}_csrf`} data-initial-draft={JSON.stringify(initialDraft)}>
+      <aside class="publish-notice-banner" data-publish-notice-banner hidden role="alert" aria-live="assertive">
+        <div class="notice-main">
+          <span class="notice-badge">{t("dashboard.store_builder.blockers_dialog.required_badge")}</span>
+          <div class="notice-text">
+            <strong data-notice-title>{t("dashboard.store_builder.blockers_dialog.title")}</strong>
+            <p data-notice-desc>{t("dashboard.store_builder.blockers_dialog.description")}</p>
+            <ul class="notice-blockers-list" data-notice-blockers-list></ul>
+          </div>
+        </div>
+        <div class="notice-actions">
+          <a class="sln-button sln-button-primary sln-button-sm" href={workspaceHref("/onboarding")}>{t("dashboard.store_builder.blockers_dialog.action_onboarding")} <span aria-hidden="true">→</span></a>
+          <button class="sln-button sln-button-secondary sln-button-sm" type="button" data-dismiss-notice>{t("dashboard.store_builder.blockers_dialog.close")}</button>
+        </div>
+      </aside>
+
+      <dialog class="publish-dialog" data-publish-dialog aria-labelledby="publish-dialog-title">
+        <div class="dialog-card">
+          <button class="dialog-close" type="button" data-close-publish-dialog aria-label={t("dashboard.store_builder.blockers_dialog.close")}>×</button>
+          <div class="panel-heading">
+            <p class="eyebrow">{t("dashboard.store_builder.eyebrow")}</p>
+            <h2 id="publish-dialog-title">{t("dashboard.store_builder.blockers_dialog.title")}</h2>
+            <p class="dialog-copy">{t("dashboard.store_builder.blockers_dialog.description")}</p>
+          </div>
+          <ul class="publish-dialog-blockers" data-publish-dialog-blockers></ul>
+          <div class="dialog-actions">
+            <button class="sln-button sln-button-secondary" type="button" data-close-publish-dialog>{t("dashboard.store_builder.blockers_dialog.close")}</button>
+            <a class="sln-button sln-button-primary" href={workspaceHref("/onboarding")}>{t("dashboard.store_builder.blockers_dialog.action_onboarding")} <span aria-hidden="true">→</span></a>
+          </div>
+        </div>
+      </dialog>
+
       <div class="mobile-view-tabs" role="tablist" aria-label={t("dashboard.store_builder.mobile.aria")}>
         <button id="builder-view-settings" class="mobile-view-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="store-settings" data-builder-view-tab="settings">{t("dashboard.store_builder.mobile.settings")}</button>
         <button id="builder-view-preview" class="mobile-view-tab" type="button" role="tab" aria-selected="false" aria-controls="store-preview" data-builder-view-tab="preview" tabindex="-1">{t("dashboard.store_builder.mobile.preview")}</button>
@@ -376,9 +414,33 @@ const storeBuilderClientCopy = {
   .sln-button-primary:hover:not(:disabled) { background: var(--sln-action-primary-hover); }
   .save-state { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: var(--sln-radius-pill); background: var(--sln-tint-success); color: var(--sln-success-text); font: var(--sln-font-caption); font-weight: 600; }
   .save-state[data-state="never_published"], .save-state[data-state="publishing"], .save-state[data-state="saving"], .save-state[data-state="unpublished_changes"], .save-state[data-state="unsaved"] { background: var(--sln-tint-warning); color: var(--sln-warning-text-strong); }
-  .save-state[data-state="failed"], .save-state[data-state="forbidden"], .save-state[data-state="invalid_contrast"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }
+  .save-state[data-state="failed"], .save-state[data-state="forbidden"], .save-state[data-state="invalid_contrast"], .save-state[data-state="publish_blocked"], .save-state[data-state="publish_failed"] { background: var(--sln-tint-danger); color: var(--sln-danger-text); }
   .publish-blockers { margin: 8px 0 0; padding: 10px 14px 10px 30px; border: 1px solid color-mix(in srgb, var(--sln-state-danger) 30%, var(--sln-border-default)); border-radius: var(--sln-radius-md); background: var(--sln-tint-danger); color: var(--sln-danger-text); font: var(--sln-font-body-sm); }
   .publish-blockers li + li { margin-top: 4px; }
+  .publish-notice-banner { display: flex; align-items: start; justify-content: space-between; gap: var(--sln-space-4); margin-bottom: var(--sln-space-6); padding: var(--sln-space-4) var(--sln-space-5); border: 1px solid color-mix(in srgb, var(--sln-state-danger) 30%, var(--sln-border-default)); border-radius: var(--sln-radius-lg); background: var(--sln-tint-danger); color: var(--sln-danger-text); }
+  .notice-main { display: flex; align-items: start; gap: var(--sln-space-3); min-width: 0; }
+  .notice-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--sln-radius-pill); background: var(--sln-state-danger); color: var(--sln-text-inverse); font: var(--sln-font-caption); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .notice-text { display: grid; gap: 4px; min-width: 0; }
+  .notice-text strong { color: var(--sln-danger-text); font: var(--sln-font-label); font-weight: 600; }
+  .notice-text p { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .notice-blockers-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0; padding: 0; list-style: none; }
+  .notice-blockers-list li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-surface); font: var(--sln-font-caption); color: var(--sln-text-primary); }
+  .notice-blockers-list a { color: var(--sln-action-primary); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+  .notice-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .publish-dialog { width: min(100% - 32px, 520px); border: 0; border-radius: var(--sln-radius-xl); padding: 0; background: transparent; }
+  .publish-dialog[open] { position: fixed; inset: 16px; z-index: var(--sln-z-dialog); max-height: calc(100dvh - 32px); margin: auto; overflow-y: auto; box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--sln-ink-950) 52%, transparent); }
+  .publish-dialog::backdrop { background: color-mix(in srgb, var(--sln-ink-950) 52%, transparent); backdrop-filter: blur(4px); }
+  .dialog-card { position: relative; display: grid; gap: 16px; padding: 28px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-xl); background: var(--sln-bg-surface); color: var(--sln-text-primary); box-shadow: var(--sln-shadow-lg); }
+  .dialog-close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--sln-bg-subtle); color: var(--sln-text-secondary); font-size: 22px; cursor: pointer; }
+  .dialog-copy { margin: 0; color: var(--sln-text-secondary); font: var(--sln-font-body-sm); }
+  .publish-dialog-blockers { display: grid; gap: 10px; margin: 4px 0 0; padding: 0; list-style: none; }
+  .publish-dialog-blockers li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--sln-border-default); border-radius: var(--sln-radius-md); background: var(--sln-bg-canvas); }
+  .publish-dialog-blockers .blocker-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .publish-dialog-blockers .blocker-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sln-state-danger); flex-shrink: 0; }
+  .publish-dialog-blockers .blocker-name { font: var(--sln-font-label); color: var(--sln-text-primary); font-weight: 500; }
+  .publish-dialog-blockers .blocker-action { font: var(--sln-font-caption); color: var(--sln-action-primary); font-weight: 600; text-decoration: none; padding: 4px 10px; border-radius: var(--sln-radius-sm); border: 1px solid var(--sln-border-default); background: var(--sln-bg-surface); }
+  .publish-dialog-blockers .blocker-action:hover { background: var(--sln-tint-indigo); }
+  .dialog-actions { display: flex; justify-content: end; gap: 10px; margin-top: 6px; }
   .builder { margin-top: var(--sln-space-8); }
   .mobile-view-tabs { display: none; }
   .builder-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: var(--sln-space-5); }
