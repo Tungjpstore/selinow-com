@@ -290,6 +290,13 @@ const DYNAMIC_TRANSLATION_ALLOWLIST: readonly DynamicAllowlistEntry[] = [
   },
   {
     catalog: "dashboard",
+    expression: "`dashboard.overview.readiness_check.${code}.title`",
+    guard: /readinessCheckLabels[\s\S]*Object\.fromEntries\([\s\S]*\.map\(\(code\)[\s\S]*`dashboard\.overview\.readiness_check\.\$\{code\}\.title`/u,
+    identifier: "t",
+    path: "src/pages/app/store.astro",
+  },
+  {
+    catalog: "dashboard",
     expression: "key",
     guard: /role === "owner" \|\| role === "manager" \|\| role === "support" \|\| role === "viewer"[\s\S]*return t\(key\)/u,
     identifier: "t",

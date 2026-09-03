@@ -2,6 +2,41 @@
 
 Last updated: 2026-09-04
 
+## Hardening & Upgrade Batch: Telegram menu fencing, storefront KV resolver, discounts UI, publish blockers (2026-09-04)
+
+Committed as `f469c38` (Telegram hardening) and `e0c13ff` (storefront upgrades), plus the contract-test fix and this docs entry.
+
+- **Confirmed bug fixes in the Telegram menu templates feature (A)**:
+  - `src/lib/telegram/commerce.ts` `menuReply`: null-safe `templatePreset` fallback (`?? "license_vault"`) so pre-0124 or drifted schemas can never render an undefined reply; honest `vip_community` buyer copy (no unimplemented invite-link promise).
+  - `src/lib/telegram/integrations.ts` `updateTelegramMenuConfig`: full generation-fenced mutation (`shop_id` + `active_credential_id` + `generation_state='active'` + status set) failing closed with `telegram_integration_busy` 409; strict input validation (control-char strip, welcome ≤500 chars, `support_handle` format, `menu_config_json` shape/allowlist ≤2000 chars); mini-app menu button URL derived from the shop's own admitted storefront hostname (`shopStorefrontHostname`) — the hardcoded `selinow.com` production URL (404 `/launch` target) is gone; provider sync failures now record `last_safe_error_code='telegram_menu_update_failed'` + audit `telegram.menu_sync_failed` instead of being swallowed; `configureProvider` re-applies the preset-aware menu button on rotate/reconnect so rotation no longer silently resets it.
+  - `src/lib/telegram/integrations.ts` `configureProvider`: `drop_pending_updates` now defaults to `false` per the Telegram integration contract (pending buyer messages survive transient failures / same-bot rotation); only an explicit reset flow may drop.
+  - Dashboard script `src/scripts/dashboard/integrations.ts`: preview simulator no longer builds DOM via `innerHTML` with seller-typed input (injection surface removed); save flow moved to the shared `requestApi`/`setFeedback` patterns with idempotency key and tenant-change guard; support-handle validation mirrored client-side; panel copy fully i18n (vi+en) via new `dashboard.integrations.telegram_template.*` keys.
+- **Telegram lifecycle hardening (B)**:
+  - `beginGenerationDrain` bounds the `processing` update check by the 15-minute claim staleness window — disconnect/rotate no longer blocks indefinitely on a crashed worker's update row.
+  - New `tests/unit/telegram-integration-fencing-audit.test.ts`: static contract that every `UPDATE telegram_integrations` in `operations/deletion.ts`, `telegram/integrations.ts`, `telegram/webhooks.ts` stays tenant-scoped and lifecycle-fenced (reviewed allowlist for deliberate exceptions) — mechanically prevents the "new path forgot its guards" bug class; also locks the drain staleness bound, the null-preset fallback, and the no-hardcoded-domain rule.
+  - New `tests/unit/telegram-menu-config-service.test.ts`: behavioral coverage for fencing 409, validation 400s, web_app menu button targeting the tenant storefront hostname, provider-failure health/audit recording, and pending-state skip.
+  - New `tests/unit/telegram-menu-templates-migration.test.ts`: proves 0124 is additive-only, backfills `license_vault`, enforces the preset CHECK, and provisions the tenant-leading index.
+- **Storefront KV resolver cache (D1)**:
+  - `src/lib/storefront/cache.ts`: first production use of the previously unused `PLATFORM_CACHE` KV binding. `resolveActiveStorefrontCacheKey` consults a 30-second TTL cache of *positive, version-fenced* resolver resolutions (domainId + `domainVersion-publishedVersion` + defaultLocale) before falling back to the authoritative D1 query (which also validates Turnstile admission, subscription, and entitlement state). KV is never authoritative: entries are bounded by TTL, purged on publish (`publishReadyStorefront`), suspend (`suspendShop`), and domain lifecycle mutations (`checkCustomDomain`, `deleteCustomDomain`, `setPrimaryDomain`, `refreshCustomDomainTurnstileAdmission`), and a missing/failed binding silently degrades to D1 per request.
+  - New `tests/unit/storefront-resolver-kv.test.ts`: KV hit skips D1, miss seeds with correct TTL value, refusals never seed, malformed entries fall back, purge normalizes hostnames and is shop-scoped.
+- **Discount codes dashboard UI (D2)**:
+  - New `src/scripts/dashboard/discounts.ts` + section/dialog in `src/pages/app/products.astro`: list/create/enable/disable discount codes against the existing seller-discount API (`GET/POST /discounts`, `PATCH /discounts/:id`), with money formatting via the shared currency helpers, i18n (vi+en) `dashboard.discounts.*` keys, theme-token styling, safe DOM rendering, and static i18n call sites (i18n call-site contract passes).
+- **Publish blocker surfacing (D3)**:
+  - `src/pages/app/store.astro` + `src/scripts/dashboard/store-builder.ts`: a failed publish (`readiness_failed`) now fetches the owner readiness projection and renders every failed required check as a localized blocker list (`dashboard.overview.readiness_check.<code>.title`), replacing the raw 409 error code; registered in the i18n dynamic-key allowlist.
+- **Onboarding dead-code purge (D4)**:
+  - Removed the legacy non-i18n `readableError` from `src/lib/dashboard/onboarding-ui.ts` (production path uses `readableErrorKey`); test now covers the i18n key mapping.
+- **Verification Gates (final state)**:
+  - `npm run check`: 0 errors, 0 warnings.
+  - `npm run lint`: 0 errors, 0 warnings.
+  - `npm run test`: 378 test files, 3,099 tests passed (100%).
+  - `npm run build`: complete.
+  - `npm run deploy:dry-run`: pass.
+- **Known limitations / next**:
+  - The PayOS provider-claim machinery was intentionally NOT re-architected (stabilized after the 0119–0123 fix series; behavioral regression surface now pinned by tests). A consolidated claim/outbox redesign remains a separate, dedicated phase.
+  - Schema drift between source (0124) and production (0052) persists by design until the production continuation ceremony; runtime compensations (e.g. `isPreCountrySchemaError`) stay in place.
+  - The telegram menu preset panel changes bot surface only for integrations on schema ≥0124 environments.
+  - KV resolver staleness is bounded at 30s; subscription-expiry mid-TTL may serve one extra cache window.
+
 ## Telegram Bot Industry Menu Templates & Interactive Simulator (2026-09-04)
 
 - **Database Migration 0124 (`migrations/0124_telegram_menu_templates.sql`)**:

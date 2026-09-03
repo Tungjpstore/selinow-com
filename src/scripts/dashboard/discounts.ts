@@ -86,6 +86,12 @@ if (workspace !== null) {
     }
   };
 
+  const statusLabel = (status: string): string => {
+    if (status === "active") return t("dashboard.discounts.status.active");
+    if (status === "disabled") return t("dashboard.discounts.status.disabled");
+    return t("dashboard.discounts.status.expired");
+  };
+
   const statusBadge = (status: string): HTMLElement => {
     const badge = document.createElement("span");
     badge.className = "sln-status";
@@ -93,7 +99,7 @@ if (workspace !== null) {
     const dot = document.createElement("span");
     dot.setAttribute("aria-hidden", "true");
     badge.appendChild(dot);
-    badge.appendChild(document.createTextNode(t(`dashboard.discounts.status.${status}`)));
+    badge.appendChild(document.createTextNode(statusLabel(status)));
     return badge;
   };
 
@@ -212,9 +218,12 @@ if (workspace !== null) {
       setFeedback(t("dashboard.discounts.client.create_saved"), "success");
     } catch (error) {
       const code = error instanceof Error ? error.message : "request_failed";
-      const validationKey = `dashboard.discounts.client.validation.${code}`;
-      setFeedback(t("dashboard.discounts.client.create_error", { code }), "danger");
-      if (code.startsWith("discount_")) setFeedback(t(validationKey), "danger");
+      if (code === "discount_code_invalid") setFeedback(t("dashboard.discounts.client.validation.discount_code_invalid"), "danger");
+      else if (code === "discount_type_invalid") setFeedback(t("dashboard.discounts.client.validation.discount_type_invalid"), "danger");
+      else if (code === "discount_value_invalid") setFeedback(t("dashboard.discounts.client.validation.discount_value_invalid"), "danger");
+      else if (code === "discount_minimum_invalid") setFeedback(t("dashboard.discounts.client.validation.discount_minimum_invalid"), "danger");
+      else if (code === "discount_window_invalid") setFeedback(t("dashboard.discounts.client.validation.discount_window_invalid"), "danger");
+      else setFeedback(t("dashboard.discounts.client.create_error", { code }), "danger");
     } finally {
       if (submit !== null) submit.disabled = false;
     }
