@@ -4,6 +4,30 @@ Last updated: 2026-09-03
 
 ## Current source of truth
 
+Production Deployment via Runbook (2026-09-03):
+- **Deployment & Candidate**:
+  - Deployed commit: `19baa8e9ed097e82a29b19cb866f35c2463d0d7d` (branch `codex/landing-page-deploy-20260801`).
+  - Worker promotion: `selinow-com-production` updated from `PREV_VERSION` (`4cbab0cc-ac81-41fc-b79f-7695596c3071`) to `NEW_VERSION` (`d5ddd0fa-a9f8-4cd1-ad0f-34810a41770d`) at 100% traffic allocation.
+  - Active routes verified: `selinow.com/*`, `*.selinow.com/*`, `*/*`, and custom domains `app.selinow.com`, `api.selinow.com`.
+  - Cron trigger (`*/15 * * * *`) and 3 queue consumers (`selinow-integration-production`, `selinow-notification-production`, `selinow-dlq-production`) active.
+- **Database Status & Backup**:
+  - Migration ledger: No pending migrations on release branch (remote D1 `selinow-production` is already at ledger milestone `0112_google_auth_foundation.sql`, well past release branch milestone `0098_auth_email_otp_system.sql`). Zero migrations applied or mutated.
+  - Production backup snapshot: `bkp_20260831203152_55d65b6cc71a` (sha256: `46c3ddfd3d974c77a8354ef2617706f447deffa084db35b0392713e9d5851c45`, path: `.wrangler/backups/production/bkp_20260831203152_55d65b6cc71a/database.sql`). Verified read-only export sha256: `22815a9911369479b1739ebb6a4ddfe3b9a61144be130fb3fb1f36d4215b29e4`.
+- **Worker Secrets**:
+  - All 12 production secrets verified present (10 required + 2 Google OAuth): `CLOUDFLARE_API_TOKEN`, `CREDENTIAL_KEK_V1`, `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_WEBHOOK_KEY`, `EXPORT_KEK_V1`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `IDENTIFIER_HMAC_SECRET`, `INVENTORY_KEK_V1`, `MAGIC_LINK_SECRET`, `SESSION_SECRET`, `TURNSTILE_SECRET_KEY`. Zero secrets added or overwritten.
+- **Post-Deploy Health & Route Verification (Step 9)**:
+  - `https://selinow.com/api/health`: 200 OK (`{"ok":true,"phase":10,"release":{"platform":"deployed","commerce":"provider_pending"},"commerce":{"contract":"principal-channel-canonical-v1"}}`).
+  - `https://app.selinow.com/api/health`: 200 OK.
+  - `https://api.selinow.com/api/health`: 200 OK.
+  - Public marketing pages: `/` (200), `/pricing` (200), `/solutions` (200).
+  - Public auth redirects: `/login` (308), `/register` (308), `/forgot-password` (308) redirecting to app subdomain.
+  - App surfaces: `https://app.selinow.com/login` (200), `https://app.selinow.com/register` (200).
+  - Provider ingress security: unsigned billing webhook POST to `ddowh_ae625ebf-69b6-40b1-bc95-4276d44410f2` returned 401 Unauthorized (fail-closed).
+- **Release Doctor & Operational Governance**:
+  - Các cổng owner-owned của release-doctor (approvals, legalSupport, pilot, monitoring, commerceAcceptance PayOS/Dodo, rollback rehearsal) vẫn chưa có -> production vẫn "platform live / full-commerce NO-GO".
+
+
+
 Production Deploy Gate Unblock — `audit_high` vulnerability (2026-09-03):
 The `release:production:dry-run` pipeline (`scripts/release-dry-run.mjs`) was
 blocked at its `audit_high` step. `npm audit --audit-level=high` reported two
